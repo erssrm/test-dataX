@@ -5,65 +5,55 @@ from your_module import validate_call_center_data  # Replace with the actual mod
 
 @pytest.fixture
 def session():
-    # Create a Snowflake session for testing
-    return Session.builder.configs(...).create()
+    # Mock or create a Snowflake session for testing
+    return Session.builder.configs({...}).create()  # Add necessary configurations
 
 @pytest.fixture
 def call_center_df(session):
     # Create a mock DataFrame for testing
     data = [
-        {"call_id": 1, "agent_id": 101, "call_start_time": "2023-10-01 10:00:00", "call_end_time": "2023-10-01 10:30:00", "call_type": "inbound", "phone_number": "+1234567890", "call_duration": 1800, "external_number": None},
-        {"call_id": 2, "agent_id": 102, "call_start_time": "2023-10-01 11:00:00", "call_end_time": "2023-10-01 11:30:00", "call_type": "outbound", "phone_number": "+0987654321", "call_duration": 1800, "external_number": "+0987654321"},
+        {"CALL_CENTER_ID": 1, "CALL_CENTER_NAME": "Center A", "LOCATION": "Location1", "OPENING_DATE": "2023-01-01", "MANAGER_ID": 101, "TOTAL_CALLS": 100, "SUCCESSFUL_CALLS": 80, "FAILED_CALLS": 20, "AVERAGE_WAIT_TIME": 5.0},
+        {"CALL_CENTER_ID": 2, "CALL_CENTER_NAME": "Center B", "LOCATION": "InvalidLocation", "OPENING_DATE": "2023-01-01", "MANAGER_ID": 102, "TOTAL_CALLS": 50, "SUCCESSFUL_CALLS": 30, "FAILED_CALLS": 25, "AVERAGE_WAIT_TIME": 3.5},
         # Add more test data as needed
     ]
     return session.create_dataframe(data)
 
-def test_completeness_check(session, call_center_df):
-    # Test for completeness check
-    incomplete_data = call_center_df.filter(col("call_id").is_null())
-    assert incomplete_data.count() == 0
+def test_completeness(session, call_center_df):
+    result = validate_call_center_data(session, call_center_df)
+    assert result.filter(col("CALL_CENTER_ID").is_null()).count() == 0
+    assert result.filter(col("CALL_CENTER_NAME").is_null()).count() == 0
+    assert result.filter(col("LOCATION").is_null()).count() == 0
+    assert result.filter(col("OPENING_DATE").is_null()).count() == 0
+    assert result.filter(col("MANAGER_ID").is_null()).count() == 0
 
-def test_valid_values_check(session, call_center_df):
-    # Test for valid values check
-    invalid_values = call_center_df.filter(~col("call_type").isin(["inbound", "outbound", "internal"]))
-    assert invalid_values.count() == 0
+def test_accuracy(session, call_center_df):
+    result = validate_call_center_data(session, call_center_df)
+    assert result.filter(~col("LOCATION").isin(["Location1", "Location2", "Location3"])).count() > 0
+    assert result.filter(~col("OPENING_DATE").rlike(r"^\d{4}-\d{2}-\d{2}$")).count() == 0
 
-def test_format_compliance_check(session, call_center_df):
-    # Test for format compliance check
-    invalid_format = call_center_df.filter(~col("phone_number").rlike(r"^\+?[1-9]\d{1,14}$"))
-    assert invalid_format.count() == 0
+def test_consistency(session, call_center_df):
+    # Assuming manager_df is available in the session
+    manager_df = session.table("manager")
+    result = validate_call_center_data(session, call_center_df)
+    assert result.join(manager_df, call_center_df["MANAGER_ID"] == manager_df["MANAGER_ID"], "left_anti").count() == 0
 
-def test_referential_integrity_check(session, call_center_df):
-    # Test for referential integrity check
-    # Assuming 'agent' table is available in the session
-    referential_issues = call_center_df.join(session.table("agent"), call_center_df["agent_id"] == col("agent.agent_id"), "left_anti")
-    assert referential_issues.count() == 0
+def test_timeliness(session, call_center_df):
+    result = validate_call_center_data(session, call_center_df)
+    assert result.filter(col("OPENING_DATE") > col("current_date()")).count() == 0
 
-def test_timestamp_validation_check(session, call_center_df):
-    # Test for timestamp validation check
-    invalid_timestamps = call_center_df.filter(col("call_start_time") > col("call_end_time"))
-    assert invalid_timestamps.count() == 0
+def test_validity(session, call_center_df):
+    result = validate_call_center_data(session, call_center_df)
+    assert result.filter(col("TOTAL_CALLS") < 0).count() == 0
+    assert result.filter(col("SUCCESSFUL_CALLS") < 0).count() == 0
+    assert result.filter(col("FAILED_CALLS") < 0).count() == 0
+    assert result.filter(col("AVERAGE_WAIT_TIME") < 0).count() == 0
 
-def test_range_check(session, call_center_df):
-    # Test for range check
-    out_of_range = call_center_df.filter((col("call_duration") < 0) | (col("call_duration") > 86400))
-    assert out_of_range.count() == 0
+def test_uniqueness(session, call_center_df):
+    result = validate_call_center_data(session, call_center_df)
+    assert result.group_by("CALL_CENTER_ID").count().filter(col("count") > 1).count() == 0
 
-def test_uniqueness_check(session, call_center_df):
-    # Test for uniqueness check
-    duplicates = call_center_df.group_by("call_id").count().filter(col("count") > 1)
-    assert duplicates.count() == 0
+def test_integrity(session, call_center_df):
+    result = validate_call_center_data(session, call_center_df)
+    assert result.filter((col("SUCCESSFUL_CALLS") + col("FAILED_CALLS")) > col("TOTAL_CALLS")).count() == 0
 
-def test_logical_consistency_check(session, call_center_df):
-    # Test for logical consistency check
-    logical_issues = call_center_df.filter(col("call_start_time") > col("call_end_time"))
-    assert logical_issues.count() == 0
-
-def test_business_logic_check(session, call_center_df):
-    # Test for business logic validation
-    business_issues = call_center_df.filter((col("call_type") == "internal") & (col("external_number").is_not_null()))
-    assert business_issues.count() == 0
-
-# Run the tests
-if __name__ == "__main__":
-    pytest.main()
+# Add more tests as needed for compliance and other checks
