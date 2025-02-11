@@ -1,64 +1,34 @@
 import pytest
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, FloatType
-from pyspark.sql.functions import col
+from unittest.mock import MagicMock
+from snowflake.snowpark import Session
+from snowflake.snowpark.functions import col
+from your_module import validate_call_center_data  # Replace with the actual module name
 
-# Initialize Spark session
-@pytest.fixture(scope="module")
-def spark():
-    return SparkSession.builder.master("local").appName("unit tests").getOrCreate()
-
-# Sample data for testing
 @pytest.fixture
-def sample_data(spark):
-    schema = StructType([
-        StructField("call_center_id", StringType(), True),
-        StructField("location", StringType(), True),
-        StructField("number_of_calls", IntegerType(), True),
-        StructField("average_call_duration", FloatType(), True),
-        StructField("call_timestamp", StringType(), True),
-        StructField("customer_satisfaction", IntegerType(), True)
-    ])
+def mock_session():
+    # Create a mock Snowflake session
+    return MagicMock(spec=Session)
+
+@pytest.fixture
+def mock_call_center_df(mock_session):
+    # Create a mock DataFrame with sample data
     data = [
-        ("1", "New York", 100, 5.5, "2023-09-30 12:00:00", 4),
-        ("2", "Los Angeles", -10, 3.2, "2023-10-02 14:00:00", 2),
-        ("3", "Invalid Location", 50, 4.0, "2023-09-29 16:00:00", 5),
-        ("1", "Chicago", 80, 6.0, "2023-09-28 10:00:00", 3)
+        {"cc_call_center_sk": 1, "cc_call_center_id": "CC1", "cc_name": "Center1", "cc_open_date_sk": 20200101, "cc_country": "ValidCountry1", "cc_state": "ValidState1", "cc_zip": "12345", "cc_rec_start_date": 20200101, "cc_rec_end_date": 20201231, "cc_closed_date_sk": 20201231, "cc_tax_percentage": 10, "cc_mkt_id": 1},
+        {"cc_call_center_sk": 2, "cc_call_center_id": "CC2", "cc_name": "Center2", "cc_open_date_sk": 20200101, "cc_country": "InvalidCountry", "cc_state": "InvalidState", "cc_zip": "1234", "cc_rec_start_date": 20200101, "cc_rec_end_date": 20191231, "cc_closed_date_sk": 20191231, "cc_tax_percentage": 110, "cc_mkt_id": None},
     ]
-    return spark.createDataFrame(data, schema)
+    df = mock_session.create_dataframe(data)
+    return df
 
-def test_check_completeness(sample_data):
-    from rules import check_completeness
-    completeness_issues = check_completeness(sample_data)
-    assert completeness_issues.filter((col("call_center_id") > 0) | (col("location") > 0)).count() == 0
+def test_validate_call_center_data(mock_session, mock_call_center_df):
+    # Call the validation function
+    valid_df = validate_call_center_data(mock_session, mock_call_center_df)
 
-def test_validate_location(sample_data):
-    from rules import validate_location
-    valid_locations = ["New York", "Los Angeles", "Chicago"]
-    location_issues = validate_location(sample_data, valid_locations)
-    assert location_issues.count() == 1
+    # Collect the results
+    results = valid_df.collect()
 
-def test_validate_numeric_ranges(sample_data):
-    from rules import validate_numeric_ranges
-    numeric_issues = validate_numeric_ranges(sample_data)
-    assert numeric_issues.count() == 1
+    # Assert that only the valid record is returned
+    assert len(results) == 1
+    assert results[0]["cc_call_center_id"] == "CC1"
 
-def test_check_consistency(sample_data):
-    from rules import check_consistency
-    consistency_issues = check_consistency(sample_data)
-    assert consistency_issues.count() == 0
-
-def test_check_timeliness(sample_data):
-    from rules import check_timeliness
-    timeliness_issues = check_timeliness(sample_data)
-    assert timeliness_issues.count() == 1
-
-def test_check_uniqueness(sample_data):
-    from rules import check_uniqueness
-    uniqueness_issues = check_uniqueness(sample_data)
-    assert uniqueness_issues.count() == 1
-
-def test_validate_business_rules(sample_data):
-    from rules import validate_business_rules
-    business_rule_issues = validate_business_rules(sample_data)
-    assert business_rule_issues.count() == 1
+if __name__ == "__main__":
+    pytest.main()
