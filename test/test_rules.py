@@ -1,59 +1,93 @@
-import pytest
+import unittest
+from unittest.mock import MagicMock
 from snowflake.snowpark import Session
 from snowflake.snowpark.functions import col
-from your_module import validate_call_center_data  # Replace with the actual module name
 
-@pytest.fixture
-def session():
-    # Mock or create a Snowflake session for testing
-    return Session.builder.configs({...}).create()  # Add necessary configurations
+# Assuming the functions are imported from the module
+from your_module import (
+    check_completeness,
+    check_accuracy,
+    check_consistency,
+    check_uniqueness,
+    check_referential_integrity,
+    check_timeliness,
+    apply_quality_checks
+)
 
-@pytest.fixture
-def call_center_df(session):
-    # Create a mock DataFrame for testing
-    data = [
-        {"CALL_CENTER_ID": 1, "CALL_CENTER_NAME": "Center A", "LOCATION": "Location1", "OPENING_DATE": "2023-01-01", "MANAGER_ID": 101, "TOTAL_CALLS": 100, "SUCCESSFUL_CALLS": 80, "FAILED_CALLS": 20, "AVERAGE_WAIT_TIME": 5.0},
-        {"CALL_CENTER_ID": 2, "CALL_CENTER_NAME": "Center B", "LOCATION": "InvalidLocation", "OPENING_DATE": "2023-01-01", "MANAGER_ID": 102, "TOTAL_CALLS": 50, "SUCCESSFUL_CALLS": 30, "FAILED_CALLS": 25, "AVERAGE_WAIT_TIME": 3.5},
-        # Add more test data as needed
-    ]
-    return session.create_dataframe(data)
+class TestDataQualityChecks(unittest.TestCase):
 
-def test_completeness(session, call_center_df):
-    result = validate_call_center_data(session, call_center_df)
-    assert result.filter(col("CALL_CENTER_ID").is_null()).count() == 0
-    assert result.filter(col("CALL_CENTER_NAME").is_null()).count() == 0
-    assert result.filter(col("LOCATION").is_null()).count() == 0
-    assert result.filter(col("OPENING_DATE").is_null()).count() == 0
-    assert result.filter(col("MANAGER_ID").is_null()).count() == 0
+    def setUp(self):
+        # Mock the Snowflake session
+        self.session = MagicMock(spec=Session)
 
-def test_accuracy(session, call_center_df):
-    result = validate_call_center_data(session, call_center_df)
-    assert result.filter(~col("LOCATION").isin(["Location1", "Location2", "Location3"])).count() > 0
-    assert result.filter(~col("OPENING_DATE").rlike(r"^\d{4}-\d{2}-\d{2}$")).count() == 0
+    def test_check_completeness(self):
+        # Mock the DataFrame
+        df_mock = MagicMock()
+        self.session.table.return_value = df_mock
 
-def test_consistency(session, call_center_df):
-    # Assuming manager_df is available in the session
-    manager_df = session.table("manager")
-    result = validate_call_center_data(session, call_center_df)
-    assert result.join(manager_df, call_center_df["MANAGER_ID"] == manager_df["MANAGER_ID"], "left_anti").count() == 0
+        # Call the function
+        result_df = check_completeness(self.session, "Call_Details", ["call_id", "timestamp"])
 
-def test_timeliness(session, call_center_df):
-    result = validate_call_center_data(session, call_center_df)
-    assert result.filter(col("OPENING_DATE") > col("current_date()")).count() == 0
+        # Check if the function adds the correct columns
+        df_mock.with_column.assert_any_call("call_id_is_null", col("call_id").is_null())
+        df_mock.with_column.assert_any_call("timestamp_is_null", col("timestamp").is_null())
 
-def test_validity(session, call_center_df):
-    result = validate_call_center_data(session, call_center_df)
-    assert result.filter(col("TOTAL_CALLS") < 0).count() == 0
-    assert result.filter(col("SUCCESSFUL_CALLS") < 0).count() == 0
-    assert result.filter(col("FAILED_CALLS") < 0).count() == 0
-    assert result.filter(col("AVERAGE_WAIT_TIME") < 0).count() == 0
+    def test_check_accuracy(self):
+        # Mock the DataFrame
+        df_mock = MagicMock()
+        self.session.table.return_value = df_mock
 
-def test_uniqueness(session, call_center_df):
-    result = validate_call_center_data(session, call_center_df)
-    assert result.group_by("CALL_CENTER_ID").count().filter(col("count") > 1).count() == 0
+        # Call the function
+        result_df = check_accuracy(self.session, "Call_Details", "call_type", ["inbound", "outbound"])
 
-def test_integrity(session, call_center_df):
-    result = validate_call_center_data(session, call_center_df)
-    assert result.filter((col("SUCCESSFUL_CALLS") + col("FAILED_CALLS")) > col("TOTAL_CALLS")).count() == 0
+        # Check if the function adds the correct column
+        df_mock.with_column.assert_called_with("call_type_is_valid", col("call_type").isin(["inbound", "outbound"]))
 
-# Add more tests as needed for compliance and other checks
+    def test_check_consistency(self):
+        # Mock the DataFrame
+        df_mock = MagicMock()
+        self.session.table.return_value = df_mock
+
+        # Call the function
+        result_df = check_consistency(self.session, "Call_Details", "timestamp", r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+        # Check if the function adds the correct column
+        df_mock.with_column.assert_called_with("timestamp_is_consistent", col("timestamp").rlike(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$"))
+
+    def test_check_uniqueness(self):
+        # Mock the DataFrame
+        df_mock = MagicMock()
+        self.session.table.return_value = df_mock
+
+        # Call the function
+        result_df = check_uniqueness(self.session, "Call_Details", "call_id")
+
+        # Check if the function performs the correct operations
+        df_mock.group_by.assert_called_with("call_id")
+        df_mock.group_by().count().filter.assert_called_with(col("count") > 1)
+
+    def test_check_referential_integrity(self):
+        # Mock the DataFrame
+        df_mock = MagicMock()
+        ref_df_mock = MagicMock()
+        self.session.table.side_effect = [df_mock, ref_df_mock]
+
+        # Call the function
+        result_df = check_referential_integrity(self.session, "Call_Details", "agent_id", "Agent_Details", "agent_id")
+
+        # Check if the function performs the correct join
+        df_mock.join.assert_called_with(ref_df_mock, df_mock["agent_id"] == ref_df_mock["agent_id"], "left_anti")
+
+    def test_check_timeliness(self):
+        # Mock the DataFrame
+        df_mock = MagicMock()
+        self.session.table.return_value = df_mock
+
+        # Call the function
+        result_df = check_timeliness(self.session, "Call_Details", "timestamp", "2023-01-01", "2023-12-31")
+
+        # Check if the function adds the correct column
+        df_mock.with_column.assert_called_with("timestamp_is_timely", (col("timestamp") >= "2023-01-01") & (col("timestamp") <= "2023-12-31"))
+
+if __name__ == '__main__':
+    unittest.main()
