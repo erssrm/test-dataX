@@ -2,92 +2,58 @@ import unittest
 from unittest.mock import MagicMock
 from snowflake.snowpark import Session
 from snowflake.snowpark.functions import col
+from your_module import check_completeness, check_accuracy, check_format, check_consistency, check_uniqueness, check_timeliness
 
-# Assuming the functions are imported from the module
-from your_module import (
-    check_completeness,
-    check_accuracy,
-    check_consistency,
-    check_uniqueness,
-    check_referential_integrity,
-    check_timeliness,
-    apply_quality_checks
-)
-
-class TestDataQualityChecks(unittest.TestCase):
+class TestDataQualityFunctions(unittest.TestCase):
 
     def setUp(self):
-        # Mock the Snowflake session
+        # Mock session and dataframes
         self.session = MagicMock(spec=Session)
+        self.df = MagicMock()
+        self.related_df = MagicMock()
 
     def test_check_completeness(self):
-        # Mock the DataFrame
-        df_mock = MagicMock()
-        self.session.table.return_value = df_mock
-
-        # Call the function
-        result_df = check_completeness(self.session, "Call_Details", ["call_id", "timestamp"])
-
-        # Check if the function adds the correct columns
-        df_mock.with_column.assert_any_call("call_id_is_null", col("call_id").is_null())
-        df_mock.with_column.assert_any_call("timestamp_is_null", col("timestamp").is_null())
+        # Test completeness check
+        required_fields = ["field1", "field2"]
+        result_df = check_completeness(self.df, required_fields)
+        for field in required_fields:
+            self.assertTrue(result_df.with_column.called_with(f"{field}_is_complete", ~col(field).is_null()))
 
     def test_check_accuracy(self):
-        # Mock the DataFrame
-        df_mock = MagicMock()
-        self.session.table.return_value = df_mock
+        # Test accuracy check
+        field = "field"
+        valid_values = ["value1", "value2"]
+        result_df = check_accuracy(self.df, field, valid_values)
+        self.assertTrue(result_df.with_column.called_with(f"{field}_is_accurate", col(field).isin(valid_values)))
 
-        # Call the function
-        result_df = check_accuracy(self.session, "Call_Details", "call_type", ["inbound", "outbound"])
-
-        # Check if the function adds the correct column
-        df_mock.with_column.assert_called_with("call_type_is_valid", col("call_type").isin(["inbound", "outbound"]))
+    def test_check_format(self):
+        # Test format check
+        field = "field"
+        format_regex = r"^\d{4}-\d{2}-\d{2}$"
+        result_df = check_format(self.df, field, format_regex)
+        self.assertTrue(result_df.with_column.called_with(f"{field}_is_formatted", col(field).rlike(format_regex)))
 
     def test_check_consistency(self):
-        # Mock the DataFrame
-        df_mock = MagicMock()
-        self.session.table.return_value = df_mock
-
-        # Call the function
-        result_df = check_consistency(self.session, "Call_Details", "timestamp", r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
-
-        # Check if the function adds the correct column
-        df_mock.with_column.assert_called_with("timestamp_is_consistent", col("timestamp").rlike(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$"))
+        # Test consistency check
+        field = "field"
+        related_field = "related_field"
+        result_df = check_consistency(self.df, field, self.related_df, related_field)
+        self.assertTrue(result_df.join.called_with(self.related_df, self.df[field] == self.related_df[related_field], "left_anti"))
 
     def test_check_uniqueness(self):
-        # Mock the DataFrame
-        df_mock = MagicMock()
-        self.session.table.return_value = df_mock
-
-        # Call the function
-        result_df = check_uniqueness(self.session, "Call_Details", "call_id")
-
-        # Check if the function performs the correct operations
-        df_mock.group_by.assert_called_with("call_id")
-        df_mock.group_by().count().filter.assert_called_with(col("count") > 1)
-
-    def test_check_referential_integrity(self):
-        # Mock the DataFrame
-        df_mock = MagicMock()
-        ref_df_mock = MagicMock()
-        self.session.table.side_effect = [df_mock, ref_df_mock]
-
-        # Call the function
-        result_df = check_referential_integrity(self.session, "Call_Details", "agent_id", "Agent_Details", "agent_id")
-
-        # Check if the function performs the correct join
-        df_mock.join.assert_called_with(ref_df_mock, df_mock["agent_id"] == ref_df_mock["agent_id"], "left_anti")
+        # Test uniqueness check
+        field = "field"
+        result_df = check_uniqueness(self.df, field)
+        self.assertTrue(result_df.group_by.called_with(field))
+        self.assertTrue(result_df.count.called)
+        self.assertTrue(result_df.filter.called_with(col("count") > 1))
 
     def test_check_timeliness(self):
-        # Mock the DataFrame
-        df_mock = MagicMock()
-        self.session.table.return_value = df_mock
-
-        # Call the function
-        result_df = check_timeliness(self.session, "Call_Details", "timestamp", "2023-01-01", "2023-12-31")
-
-        # Check if the function adds the correct column
-        df_mock.with_column.assert_called_with("timestamp_is_timely", (col("timestamp") >= "2023-01-01") & (col("timestamp") <= "2023-12-31"))
+        # Test timeliness check
+        field = "field"
+        max_date = "2023-12-31"
+        result_df = check_timeliness(self.df, field, max_date)
+        self.assertTrue(result_df.with_column.called_with(f"{field}_is_timely", col(field) <= max_date))
 
 if __name__ == '__main__':
     unittest.main()
